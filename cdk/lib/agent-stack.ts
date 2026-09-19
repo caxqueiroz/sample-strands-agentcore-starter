@@ -23,6 +23,7 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as firehose from 'aws-cdk-lib/aws-kinesisfirehose';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { AwsCliLayer } from 'aws-cdk-lib/lambda-layer-awscli';
 import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
@@ -549,6 +550,45 @@ def handler(event, context):
 
     buildWaiter.node.addDependency(triggerBuild);
 
+    // --- Arize AX tracing (opt-in) ---
+    // When enabled, the agent exports its traces to Arize AX over OTLP and ADOT
+    // is switched off, so agent spans no longer reach CloudWatch/X-Ray (this
+    // includes the GenAI Observability dashboard and AgentCore Online
+    // Evaluations, which read those spans). The credentials live in a secret
+    // created here with empty placeholders; fill it in after deploying:
+    //   aws secretsmanager put-secret-value --secret-id <appName>/arize \
+    //     --secret-string '{"space_id":"...","api_key":"..."}'
+    // The agent reads it when a runtime session starts, so no redeploy is needed.
+    const arizeEnvironment: Record<string, string> = {};
+    if (config.arizeEnabled) {
+      const arizeSecret = new secretsmanager.Secret(this, 'ArizeSecret', {
+        secretName: `${config.appName}/arize`,
+        description: 'Arize AX space ID and API key for agent tracing',
+        secretObjectValue: {
+          space_id: cdk.SecretValue.unsafePlainText(''),
+          api_key: cdk.SecretValue.unsafePlainText(''),
+        },
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      arizeSecret.grantRead(this.agentRuntimeRole);
+
+      Object.assign(arizeEnvironment, {
+        ARIZE_ENABLED: 'true',
+        ARIZE_PROJECT_NAME: config.arizeProjectName,
+        ARIZE_OTLP_ENDPOINT: config.arizeOtlpEndpoint,
+        ARIZE_SECRET_ARN: arizeSecret.secretArn,
+        // Tells AgentCore not to apply its own ADOT tracing configuration.
+        DISABLE_ADOT_OBSERVABILITY: 'true',
+      });
+
+      NagSuppressions.addResourceSuppressions(arizeSecret, [
+        {
+          id: 'AwsSolutions-SMG4',
+          reason: 'Third-party Arize AX API key; it is rotated in Arize, which Secrets Manager rotation cannot do.',
+        },
+      ]);
+    }
+
     // --- CfnRuntime ---
     this.agentRuntime = new bedrockagentcore.CfnRuntime(this, 'AgentRuntime', {
       agentRuntimeName: config.agentRuntimeName,
@@ -584,6 +624,7 @@ def handler(event, context):
         OPENAI_BASE_URL: `https://bedrock-mantle.${config.mantleRegion}.api.aws/v1`,
         MANTLE_PROJECT: 'default',
         // NOTE: no OPENAI_API_KEY - auth uses a runtime-minted token (Req 6.2)
+        ...arizeEnvironment,
       },
       tags: {
         Application: config.appName,
@@ -1024,7 +1065,7 @@ def handler(event, context):
     // Resource Policy for X-Ray Transaction Search
     // ========================================================================
 
-    new logs.CfnResourcePolicy(this, 'XRayTracingPolicy', {
+    const xrayTracingPolicy = new logs.CfnResourcePolicy(this, 'XRayTracingPolicy', {
       policyName: 'AgentCoreTracingPolicy',
       policyDocument: JSON.stringify({
         Version: '2012-10-17',
@@ -1061,24 +1102,27 @@ def handler(event, context):
       functionName: `${config.appName}-xray-config`,
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'index.handler',
-      timeout: cdk.Duration.minutes(2),
+      // Long enough to wait out the PENDING -> ACTIVE destination switch below,
+      // which has been observed to take over 100s on a fresh account.
+      timeout: cdk.Duration.minutes(10),
       memorySize: 128,
       code: lambda.Code.fromInline(`
 import boto3
 import json
+import time
 import cfnresponse
 
 def handler(event, context):
     print(f"Event: {json.dumps(event)}")
-    
+
     if event['RequestType'] == 'Delete':
         cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
         return
-    
+
     try:
         xray = boto3.client('xray')
         results = {}
-        
+
         try:
             xray.update_trace_segment_destination(Destination='CloudWatchLogs')
             results['TransactionSearch'] = 'Enabled'
@@ -1087,7 +1131,18 @@ def handler(event, context):
                 results['TransactionSearch'] = 'Already enabled'
             else:
                 raise e
-        
+
+        # The destination switch is asynchronous (PENDING -> ACTIVE). XRAY
+        # delivery destinations are rejected until it is ACTIVE, and the trace
+        # deliveries depend on this resource, so wait for it here.
+        for _ in range(108):
+            dest = xray.get_trace_segment_destination()
+            if dest.get('Destination') == 'CloudWatchLogs' and dest.get('Status') == 'ACTIVE':
+                break
+            time.sleep(5)
+        else:
+            raise RuntimeError(f"Trace segment destination not ACTIVE: {dest}")
+
         try:
             xray.update_indexing_rule(
                 Name='Default',
@@ -1208,12 +1263,20 @@ def handler(event, context):
       }),
     });
 
-    new cdk.CustomResource(this, 'XRayConfig', {
+    const xrayConfig = new cdk.CustomResource(this, 'XRayConfig', {
       serviceToken: xrayConfigProvider.serviceToken,
       properties: {
         Timestamp: Date.now().toString(),
       },
     });
+    // Switching the trace destination to CloudWatch Logs requires the resource
+    // policy above, and XRAY delivery destinations are rejected until the switch
+    // is done. Without these edges a fresh account fails the stack with
+    // "X-Ray Delivery Destination is supported with CloudWatch Logs as a Trace
+    // Segment Destination".
+    xrayConfig.node.addDependency(xrayTracingPolicy);
+    tracesDelivery.node.addDependency(xrayConfig);
+    memoryTracesDelivery.node.addDependency(xrayConfig);
 
     // ========================================================================
     // AGENTCORE ONLINE EVALUATION CONFIG
