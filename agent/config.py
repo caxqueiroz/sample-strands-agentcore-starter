@@ -30,6 +30,10 @@ class AgentConfig:
         openai_base_url: Mantle endpoint base URL (region-derived when unset)
         openai_api_key: Optional Mantle token override for local/advanced use
         mantle_project: Mantle project identifier (default "default")
+        arize_enabled: Export traces to Arize AX instead of CloudWatch/X-Ray
+        arize_project_name: Arize AX project the traces are grouped under
+        arize_otlp_endpoint: Arize AX OTLP gRPC endpoint
+        arize_secret_arn: Secrets Manager secret holding space_id and api_key
     """
     # Required fields (no defaults) must come first
     memory_id: str
@@ -49,6 +53,10 @@ class AgentConfig:
     openai_base_url: Optional[str] = None
     openai_api_key: Optional[str] = None
     mantle_project: str = "default"
+    arize_enabled: bool = False
+    arize_project_name: str = "agentcore-chat-agent"
+    arize_otlp_endpoint: str = "https://otlp.arize.com:443"
+    arize_secret_arn: Optional[str] = None
     
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -115,6 +123,12 @@ class AgentConfig:
             or "default"
         )
         
+        # Arize AX tracing (opt-in; set by the Agent stack when ARIZE_ENABLED=true)
+        arize_enabled = os.getenv("ARIZE_ENABLED", "false").lower() in ("true", "1", "yes")
+        arize_project_name = os.getenv("ARIZE_PROJECT_NAME", "agentcore-chat-agent")
+        arize_otlp_endpoint = os.getenv("ARIZE_OTLP_ENDPOINT", "https://otlp.arize.com:443")
+        arize_secret_arn = os.getenv("ARIZE_SECRET_ARN") or None
+        
         return cls(
             memory_id=memory_id,
             aws_region=aws_region,
@@ -132,4 +146,8 @@ class AgentConfig:
             openai_base_url=openai_base_url,
             openai_api_key=openai_api_key,
             mantle_project=mantle_project,
+            arize_enabled=arize_enabled,
+            arize_project_name=arize_project_name,
+            arize_otlp_endpoint=arize_otlp_endpoint,
+            arize_secret_arn=arize_secret_arn,
         )

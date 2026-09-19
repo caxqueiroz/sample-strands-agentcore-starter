@@ -4,6 +4,8 @@ strands-agents[otel,openai,anthropic]
 aws-bedrock-token-generator
 strands-agents-tools
 aws-opentelemetry-distro
+openinference-instrumentation-strands-agents
+opentelemetry-exporter-otlp-proto-grpc
 psutil
 httpx
 beautifulsoup4

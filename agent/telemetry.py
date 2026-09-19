@@ -62,7 +62,79 @@ class AgentTelemetry:
         )
         
         self._initialized = True
-    
+
+    def setup_arize(
+        self,
+        project_name: str,
+        otlp_endpoint: str,
+        secret_arn: Optional[str],
+        region: str,
+        service_name: str = "agentcore-chat-agent"
+    ) -> bool:
+        """Configure OpenTelemetry to export Strands traces to Arize AX.
+
+        Registers a global TracerProvider that converts Strands spans to
+        OpenInference (the format Arize renders natively) and exports them over
+        OTLP gRPC. Requires the container to run without ADOT
+        (``opentelemetry-instrument``), which would otherwise own the global
+        provider and reject this one.
+
+        Args:
+            project_name: Arize AX project the traces are grouped under
+            otlp_endpoint: Arize AX OTLP gRPC endpoint
+            secret_arn: Secrets Manager secret with ``space_id`` and ``api_key``
+            region: AWS region of the secret
+            service_name: Service name for telemetry identification
+
+        Returns:
+            True if the exporter was configured, False if credentials are missing
+
+        Raises:
+            Exception: If the secret cannot be read
+        """
+        if self._initialized:
+            return True
+
+        import json
+        import boto3
+        from openinference.instrumentation.strands_agents import StrandsAgentsToOpenInferenceProcessor
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        if not secret_arn:
+            return False
+        secret = json.loads(
+            boto3.client("secretsmanager", region_name=region)
+            .get_secret_value(SecretId=secret_arn)["SecretString"]
+        )
+        space_id = (secret.get("space_id") or "").strip()
+        api_key = (secret.get("api_key") or "").strip()
+        if not space_id or not api_key:
+            return False
+
+        provider = TracerProvider(resource=Resource.create({
+            "openinference.project.name": project_name,
+            "service.name": service_name,
+        }))
+        # The converter must run before the exporter so Arize receives
+        # OpenInference spans rather than raw Strands spans.
+        provider.add_span_processor(StrandsAgentsToOpenInferenceProcessor())
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(
+            endpoint=otlp_endpoint,
+            headers={
+                "arize-space-id": space_id,
+                "authorization": api_key,
+                "arize-interface": "python",
+            },
+        )))
+        trace.set_tracer_provider(provider)
+
+        self._initialized = True
+        return True
+
     @property
     def initialized(self) -> bool:
         """Check if telemetry has been initialized."""
@@ -93,6 +165,36 @@ def setup_telemetry(
         enabled=enabled,
         otlp_endpoint=otlp_endpoint,
         console_export=console_export,
+        service_name=service_name
+    )
+
+
+def setup_arize_telemetry(
+    project_name: str,
+    otlp_endpoint: str,
+    secret_arn: Optional[str],
+    region: str,
+    service_name: str = "agentcore-chat-agent"
+) -> bool:
+    """Setup OpenTelemetry to export traces to Arize AX.
+
+    Convenience function to configure the global telemetry instance.
+
+    Args:
+        project_name: Arize AX project the traces are grouped under
+        otlp_endpoint: Arize AX OTLP gRPC endpoint
+        secret_arn: Secrets Manager secret with space_id and api_key
+        region: AWS region of the secret
+        service_name: Service name for telemetry
+
+    Returns:
+        True if the exporter was configured, False if credentials are missing
+    """
+    return _telemetry.setup_arize(
+        project_name=project_name,
+        otlp_endpoint=otlp_endpoint,
+        secret_arn=secret_arn,
+        region=region,
         service_name=service_name
     )
 

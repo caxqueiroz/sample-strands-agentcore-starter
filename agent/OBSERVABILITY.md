@@ -62,6 +62,44 @@ agentcore run --agent my_agent
 
 Access Jaeger UI at http://localhost:16686
 
+## Arize AX Integration
+
+Agent traces can be sent to [Arize AX](https://arize.com/docs/ax/integrations/python-agent-frameworks/aws-strands/bedrock-agentcore) instead of CloudWatch/X-Ray. It is opt-in and set at deploy time.
+
+### Enable
+
+```bash
+cd cdk
+ARIZE_ENABLED=true ARIZE_PROJECT_NAME=my-project ./deploy-all.sh --region us-east-1 --ingress furl
+
+# Then store your Arize space ID and API key (Arize AX > Settings)
+aws secretsmanager put-secret-value --region us-east-1 \
+  --secret-id htmx-chatapp/arize \
+  --secret-string '{"space_id":"<space-id>","api_key":"<api-key>"}'
+```
+
+The agent reads the secret when a runtime session starts, so no redeploy is needed after setting it. Until it is filled in, the agent logs a warning and exports no traces.
+
+| Deploy-time variable | Default | Purpose |
+|----------------------|---------|---------|
+| `ARIZE_ENABLED` | `false` | Turn on Arize AX export |
+| `ARIZE_PROJECT_NAME` | app name (`htmx-chatapp`) | Arize AX project for the traces |
+| `ARIZE_OTLP_ENDPOINT` | `https://otlp.arize.com:443` | OTLP gRPC endpoint |
+
+### How it works
+
+- The container starts without `opentelemetry-instrument` and the runtime sets `DISABLE_ADOT_OBSERVABILITY=true`. ADOT would otherwise own the global tracer provider and reject the Arize one.
+- `telemetry.py` registers a tracer provider that runs `StrandsAgentsToOpenInferenceProcessor` (so Arize renders agent, LLM, tool and chain spans natively) followed by an OTLP gRPC exporter authenticated with the secret's values.
+- `session.id` and `user.id` from the agent's trace attributes carry through, so traces group by chat session and user in Arize.
+
+### Trade-offs
+
+With Arize enabled, the agent's own spans no longer reach CloudWatch, which affects:
+- the CloudWatch GenAI Observability dashboard and the admin UI's CloudWatch trace links
+- AgentCore Online Evaluations (`OnlineEvalConfig`), which scores agent spans read from CloudWatch
+
+Runtime application logs, usage logs (cost tracking) and the chat app's own evaluations are unaffected.
+
 ## CloudWatch X-Ray Integration
 
 AgentCore Runtime automatically instruments your agent when `aws-opentelemetry-distro` is in requirements.txt.
