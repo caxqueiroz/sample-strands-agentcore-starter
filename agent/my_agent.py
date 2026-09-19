@@ -15,7 +15,7 @@ from aws_bedrock_token_generator import provide_token
 from config import AgentConfig, derive_mantle_base_url
 from guardrails import NotifyOnlyGuardrailsHook
 from logger import setup_logger
-from telemetry import setup_telemetry, is_telemetry_initialized
+from telemetry import setup_arize_telemetry, setup_telemetry, is_telemetry_initialized
 from tools.knowledge_base import search_knowledge_base
 from tools.url_fetcher import fetch_url_content
 from tools.weather import get_current_weather
@@ -41,7 +41,7 @@ def strip_reasoning(text: str) -> str:
 
 # Default model when no modelId is supplied in the payload.
 # Must match `default_model_id` in chatapp/app/static/models.json.
-DEFAULT_MODEL_ID = "anthropic.claude-haiku-4-5"
+DEFAULT_MODEL_ID = "openai.gpt-oss-120b"
 
 # Global config and logger - will be initialized on first invoke
 _config = None
@@ -58,8 +58,28 @@ def get_config():
         _memory_client = MemoryClient(region_name=_config.aws_region)
         _memory_id = _config.memory_id
         
+        # Arize AX tracing replaces the default telemetry path when enabled.
+        # Failures only disable tracing; they never block the agent.
+        if _config.arize_enabled and not is_telemetry_initialized():
+            try:
+                if setup_arize_telemetry(
+                    project_name=_config.arize_project_name,
+                    otlp_endpoint=_config.arize_otlp_endpoint,
+                    secret_arn=_config.arize_secret_arn,
+                    region=_config.aws_region,
+                    service_name="agentcore-chat-agent"
+                ):
+                    _logger.info(f"Arize AX tracing enabled - project: {_config.arize_project_name}")
+                else:
+                    _logger.warning(
+                        "Arize AX tracing enabled but space_id/api_key are not set in "
+                        f"{_config.arize_secret_arn} - traces will not be exported"
+                    )
+            except Exception as e:
+                _logger.error(f"Failed to configure Arize AX tracing (continuing without it): {e}")
+
         # Setup OpenTelemetry if not already initialized
-        if not is_telemetry_initialized():
+        elif not is_telemetry_initialized():
             setup_telemetry(
                 enabled=_config.otel_enabled,
                 otlp_endpoint=_config.otel_endpoint,
@@ -277,8 +297,8 @@ async def invoke(payload, context):
     # Get model ID and API type from payload with default fallback
     model_id = payload.get("modelId") or DEFAULT_MODEL_ID
     # Default API must match DEFAULT_MODEL_ID's catalog entry. The default model
-    # (anthropic.claude-haiku-4-5) is served via the Anthropic Messages API.
-    model_api = payload.get("modelApi", "messages")  # "chat", "responses", or "messages"
+    # (openai.gpt-oss-120b) is served via the Chat Completions API.
+    model_api = payload.get("modelApi", "chat")  # "chat", "responses", or "messages"
 
     # Optional per-model Mantle region, sent by the chatapp from the catalog's
     # `region` field. Mantle model availability is not uniform across regions:

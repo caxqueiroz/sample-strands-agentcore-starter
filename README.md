@@ -338,6 +338,9 @@ Options:
 | `OPENAI_BASE_URL` | Optional Mantle endpoint override; derived from `MANTLE_REGION` as `https://bedrock-mantle.<region>.api.aws/v1` when unset |
 | `MANTLE_PROJECT` | Mantle project identifier (default: `default`) |
 | `OPENAI_API_KEY` | Optional Mantle token override for local/advanced use; when unset the agent mints a short-term token from the runtime's AWS credentials |
+| `ARIZE_ENABLED` | Export agent traces to Arize AX instead of CloudWatch/X-Ray (set at deploy time; see `agent/OBSERVABILITY.md`) |
+| `ARIZE_PROJECT_NAME` | Arize AX project name (default: app name) |
+| `ARIZE_SECRET_ARN` | Secret holding the Arize `space_id` and `api_key` (created by the Agent stack) |
 
 ## ChatApp
 | Variable | Required | Description |

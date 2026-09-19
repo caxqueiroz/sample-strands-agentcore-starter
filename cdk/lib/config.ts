@@ -97,6 +97,14 @@ export interface AppConfig {
   // AgentCore configuration
   /** AgentCore Runtime name */
   agentRuntimeName: string;
+
+  // Arize AX tracing (opt-in)
+  /** Send agent traces to Arize AX instead of CloudWatch/X-Ray (ADOT is disabled) */
+  arizeEnabled: boolean;
+  /** Arize AX project name the agent traces are grouped under */
+  arizeProjectName: string;
+  /** OTLP gRPC endpoint for Arize AX */
+  arizeOtlpEndpoint: string;
 }
 
 /**
@@ -188,6 +196,11 @@ export const config: AppConfig = {
 
   // AgentCore configuration
   agentRuntimeName: getEnvOrDefault('AGENT_RUNTIME_NAME', appName.replace(/-/g, '_')),
+
+  // Arize AX tracing (opt-in via ARIZE_ENABLED=true at synth time)
+  arizeEnabled: getEnvOrDefault('ARIZE_ENABLED', 'false').toLowerCase() === 'true',
+  arizeProjectName: getEnvOrDefault('ARIZE_PROJECT_NAME', appName),
+  arizeOtlpEndpoint: getEnvOrDefault('ARIZE_OTLP_ENDPOINT', 'https://otlp.arize.com:443'),
 };
 
 /**
