@@ -188,7 +188,7 @@ const AVAILABLE_MODELS = (_MODEL_CATALOG.models || [])
  * 
  * Requirements: 10.8
  */
-const DEFAULT_MODEL_ID = _MODEL_CATALOG.default_model_id || "anthropic.claude-haiku-4-5";
+const DEFAULT_MODEL_ID = _MODEL_CATALOG.default_model_id || "openai.gpt-oss-120b";
 
 /**
  * Get the currently selected model from localStorage.

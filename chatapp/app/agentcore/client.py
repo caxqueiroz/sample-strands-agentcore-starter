@@ -346,8 +346,8 @@ class AgentCoreClient:
         prompt: str,
         session_id: str,
         user_id: str,
-        model_id: str = "anthropic.claude-haiku-4-5",
-        model_api: str = "messages",
+        model_id: str = "openai.gpt-oss-120b",
+        model_api: str = "chat",
         model_region: Optional[str] = None,
     ) -> AsyncGenerator[SSEEvent, None]:
         """Invoke AgentCore Runtime and stream the response.
@@ -428,8 +428,8 @@ class AgentCoreClient:
         prompt: str,
         session_id: str,
         user_id: str,
-        model_id: str = "anthropic.claude-haiku-4-5",
-        model_api: str = "messages",
+        model_id: str = "openai.gpt-oss-120b",
+        model_api: str = "chat",
         model_region: Optional[str] = None,
         stop_event: Optional[threading.Event] = None,
     ) -> Generator[SSEEvent, None, None]:
