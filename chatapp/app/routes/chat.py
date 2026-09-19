@@ -40,7 +40,7 @@ class ChatRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="User message")
     session_id: str = Field(..., min_length=1, description="Session ID")
     model_id: Optional[str] = Field(
-        default="anthropic.claude-haiku-4-5",
+        default="openai.gpt-oss-120b",
         description="Model identifier for LLM selection"
     )
 
@@ -121,8 +121,8 @@ async def _stream_chat_response(
     prompt: str,
     session_id: str,
     user_id: str,
-    model_id: str = "anthropic.claude-haiku-4-5",
-    model_api: str = "messages",
+    model_id: str = "openai.gpt-oss-120b",
+    model_api: str = "chat",
     model_region: str | None = None,
     user_email: str | None = None,
 ):

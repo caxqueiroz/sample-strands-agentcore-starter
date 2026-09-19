@@ -175,7 +175,7 @@ EVALUATIONS_TABLE_NAME=$EVALUATIONS_TABLE_NAME
 
 # Evaluations Configuration
 EVALUATIONS_ENABLED=true
-EVALUATIONS_JUDGE_MODEL=global.anthropic.claude-haiku-4-5-20251001-v1:0
+EVALUATIONS_JUDGE_MODEL=openai.gpt-oss-120b-1:0
 
 # Guardrail Configuration
 GUARDRAIL_ID=$GUARDRAIL_ID
